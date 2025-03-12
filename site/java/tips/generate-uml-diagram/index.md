@@ -1,18 +1,65 @@
----
-date: 2024-06-14
-title: Generate a UML diagram
-topics:
-  - java
-  - kotlin
-author: md
-subtitle: IntelliJ IDEA Ultimate allows you to generate UML diagrams.
-thumbnail: ./thumbnail.png
-seealso:
-  - title: (documentation) IntelliJ IDEA Help - UML diagrams
-    href: "https://www.jetbrains.com/help/idea/class-diagram.html"
-video: "https://youtu.be/QLaRgKlcR9A"
----
+@startuml
+actor User as user
+participant "PromiseService" as service
+participant "PromiseRepository" as repository
+participant "PromiseEventPublisher" as publisher
+participant "PromiseRetryService" as retryService
+participant "Kafka" as kafka
 
-You can use <kbd>⌥⇧⌘U</kbd> (macOS) / <kbd>Ctrl+Alt+Shift+U</kbd> (Windows/Linux) to generate a UML diagram for your code which can help you and your team to read and understand the codebase.
+user -> service: processPromiseCommand()
+activate service
 
-{% cta %}
+service -> repository: save(promise)
+activate repository
+repository --> service: promise
+deactivate repository
+
+service -> publisher: publishEvent(promise)
+activate publisher
+
+publisher -> kafka: send(event)
+activate kafka
+
+alt Успешная отправка
+    kafka --> publisher: success
+    publisher --> service: success
+    deactivate kafka
+    deactivate publisher
+    service --> user: success
+else Ошибка отправки
+    kafka --> publisher: error
+    deactivate kafka
+    publisher --> service: error
+    deactivate publisher
+
+    service -> retryService: retrySendEvent(promise)
+    activate retryService
+
+    loop Повторные попытки
+        retryService -> publisher: publishEvent(promise)
+        activate publisher
+        publisher -> kafka: send(event)
+        activate kafka
+
+        alt Успешная отправка
+            kafka --> publisher: success
+            publisher --> retryService: success
+            deactivate kafka
+            deactivate publisher
+            retryService --> service: success
+            break
+        else Ошибка отправки
+            kafka --> publisher: error
+            deactivate kafka
+            publisher --> retryService: error
+            deactivate publisher
+        end
+    end
+
+    retryService --> service: retry failed
+    deactivate retryService
+    service --> user: error
+end
+
+deactivate service
+@enduml
